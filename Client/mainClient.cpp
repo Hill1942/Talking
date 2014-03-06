@@ -45,7 +45,11 @@ HWND hChatMessageEdit;
 HWND hChatSendButton;
 HWND hChatClearButton;
 
+HWND hChatMessageEditFrame;
+
 HWND hStateLabel;
+
+HWND hUDPButton;
 
 
 
@@ -55,15 +59,25 @@ int isMax = 0;
 int isCloseHover = 0;
 int isChat = 1;
 int isConnected = 0;
+int isUDP = 0;
+
+int isSettingPage = 0;
+
+//int isChatMessageEditFocus = 0;
 
 int port;
 int clientNumber;
+
+char tempAddress[20];
+char tempPort[5];
 
 char* szClassName = "MainWindow";
 LPWSTR labelText;
 LPWSTR confirmButtonText;
 
 SOCKET clientSocket;
+
+sockaddr_in remoteAddr;
 
 BOOL CreateAndListen(int nPort);
 
@@ -86,9 +100,19 @@ LRESULT CALLBACK MyChatClearButtonProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 LRESULT CALLBACK MyStateLabelProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
+LRESULT CALLBACK MyChatMessageEditFrameProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+LRESULT CALLBACK MyUDPButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+void setLabelText(HWND hwnd, LPWSTR text, int bgWidth, int bgHeight, float fontX, float fontY);
+
 LPWSTR stringToWString(const char* szString);
 long onSocket(WPARAM wParam, LPARAM lParam);
 BOOL Connect(LPCTSTR pszRemoteAddr, u_short nPort);
+
+BOOL UDPSend(sockaddr_in remote, char* buf, int len);
+
+sockaddr_in getSockAddr(LPCTSTR pszRemoteAddr, u_short nPort);
 
 
 
@@ -102,11 +126,6 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	WSADATA wsaData;
 	WORD sockVersion = MAKEWORD(2, 0);
 	WSAStartup(sockVersion, &wsaData);
-
-	
-
-	
-
 	
 	
 	WNDCLASSEX wndclass;
@@ -116,7 +135,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	wndclass.cbClsExtra    = 0;
 	wndclass.cbWndExtra    = 0;
 	wndclass.hInstance     = hInstance;
-	wndclass.hIcon         = LoadIcon(NULL, IDI_APPLICATION);
+	wndclass.hIcon         = LoadIcon(hInstance, (LPCSTR)IDI_ICON1);
 	wndclass.hCursor       = LoadCursor(NULL, IDC_ARROW);
 	wndclass.hbrBackground = CreateSolidBrush(RGB(255, 255, 255));
 	wndclass.lpszMenuName  = NULL;
@@ -151,7 +170,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	ShowWindow(hwnd, nShowCmd);
 	UpdateWindow(hwnd);
 
-	labelText = L"Idel";
+	
 	confirmButtonText = L"Confirm";
 	
 	clientSocket = INVALID_SOCKET;
@@ -262,7 +281,7 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			hPortConfirm = CreateWindow(TEXT("Button"),
 			                          "Confirm",
 									  WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,
-									  205,
+									  215,
 									  240,
 									  65,
 									  30,
@@ -323,13 +342,26 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 									  ((LPCREATESTRUCT)lParam)->hInstance,
 									  NULL);
 			OrginProc = (WNDPROC)SetWindowLong(hStateLabel, GWL_WNDPROC, (LONG)MyStateLabelProc);
+
+			hUDPButton = CreateWindow(TEXT("Button"),
+			                          "UDP on",
+									  WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,
+									  140,
+									  240,
+									  65,
+									  30,
+									  hWnd,
+									  NULL,
+									  ((LPCREATESTRUCT)lParam)->hInstance,
+									  NULL);
+			OrginProc = (WNDPROC)SetWindowLong(hUDPButton, GWL_WNDPROC, (LONG)MyUDPButtonProc);
 			
 			hPortEdit = CreateWindow("edit",
 			                          NULL,
 									  WS_CHILD|WS_VISIBLE|WS_BORDER,
 									  150,
 									  180,
-									  120,
+									  130,
 									  30,
 									  hWnd,
 									  (HMENU)IDE_PORT,
@@ -342,13 +374,13 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 									  WS_CHILD|WS_VISIBLE|WS_BORDER,
 									  150,
 									  130,
-									  120,
+									  130,
 									  30,
 									  hWnd,
 									  (HMENU)IDE_SERVER_ADDRESS_EDIT,
 									  ((LPCREATESTRUCT)lParam)->hInstance,
 									  NULL);
-			OrginProc = (WNDPROC)SetWindowLong(hServerAddressEdit, GWL_WNDPROC, (LONG)MyPortEditProc);
+			OrginProc = (WNDPROC)SetWindowLong(hServerAddressEdit, GWL_WNDPROC, (LONG)MyServerAddressEditProc);
 
 			hChatContent = CreateWindow("listbox",
 			                          NULL,
@@ -363,9 +395,9 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 									  NULL);
 			//OrginProc = (WNDPROC)SetWindowLong(hChatContent, GWL_WNDPROC, (LONG)MyPortEditProc);
 
-			hChatMessageEdit = CreateWindow("EDIT",
+			hChatMessageEdit = CreateWindow("edit",
 			                          NULL,
-									  WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOVSCROLL,
+									  WS_CHILD|WS_VISIBLE|WS_BORDER,
 									  30,
 									  450,
 									  360,
@@ -378,16 +410,30 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 
-			HFONT hFont = CreateFont(0,12,0,0,0,0,0,0,0,0,0,0,0,TEXT("Arial"));
+			HFONT hFont = CreateFont(0,7,0,0,0,0,0,0,0,0,0,0,0,TEXT("Arial"));
             SendMessage(hChatMessageEdit, WM_SETFONT,(WPARAM)hFont,0);
+			SendMessage(hPortEdit, WM_SETFONT,(WPARAM)hFont,0);
+			SendMessage(hServerAddressEdit, WM_SETFONT,(WPARAM)hFont,0);
 
-			
+			labelText = L"Idle";
+
+			EnableWindow(hChatContent, FALSE);
+			EnableWindow(hChatMessageEdit, FALSE);
 
 			if (isChat)
 			{
 				ShowWindow(hPortConfirm, SW_HIDE);
 				ShowWindow(hPortEdit, SW_HIDE);
 				ShowWindow(hPortLabel, SW_HIDE);
+
+				
+				EnableWindow(hChatContent, FALSE);
+			    EnableWindow(hChatMessageEdit, FALSE);
+				EnableWindow(hPortConfirm, FALSE);
+				EnableWindow(hPortEdit, FALSE);
+				EnableWindow(hUDPButton, FALSE);
+				EnableWindow(hServerAddressEdit, FALSE);
+
 
 				//ShowWindow(hChatClearButton, SW_HIDE);
 				//ShowWindow(hChatClearButton, SW_SHOW);
@@ -402,9 +448,6 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		    PAINTSTRUCT ps;
 		    hdc = BeginPaint(hWnd, &ps);
 
-			
-
-
 			GetWindowRect(hWnd, &rect);
 
 			int windowX      = rect.left;
@@ -412,40 +455,33 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			int windowWidth  = rect.right  - rect.left;
 			int windowHeight = rect.bottom - rect.top;
 
-			g_width = windowWidth;
+			g_width  = windowWidth;
 			g_height = windowHeight;
 
 			Graphics    graphics(hdc);
-			SolidBrush solidBrush1(Color(255, 69, 133, 243));
+			SolidBrush  solidBrush1(Color(255, 69, 133, 243));
 			graphics.FillRectangle(&solidBrush1, 200, windowHeight - 20, windowWidth - 200, 20);
-			
 
-			SetWindowPos(hMinButton,   NULL,       windowWidth - 90, 0, 30, 25, SWP_NOSIZE);
-			SetWindowPos(hMaxButton,   hMinButton, windowWidth - 60, 0, 30, 25, SWP_NOSIZE);
-			SetWindowPos(hCloseButton, hMaxButton, windowWidth - 30, 0, 30, 25, SWP_NOSIZE);
+			Pen pen(Color(255, 143, 143, 143), 1);
+			graphics.DrawRectangle(&pen, 0, 0, windowWidth - 1, windowHeight);
+
+			SetWindowPos(hMinButton,   NULL,       windowWidth - 91, 1, 30, 25, SWP_NOSIZE);
+			SetWindowPos(hMaxButton,   hMinButton, windowWidth - 61, 1, 30, 25, SWP_NOSIZE);
+			SetWindowPos(hCloseButton, hMaxButton, windowWidth - 31, 1, 30, 25, SWP_NOSIZE);
 			SetWindowPos(hChatButton, hCloseButton,  30, 30, 75, 60, SWP_NOSIZE);
 			SetWindowPos(hSettingButton, hChatButton, 125, 30, 109, 60, SWP_NOSIZE);
 
 			SetWindowPos(hStateLabel, hSettingButton, 0, windowHeight - 20, 200, 20, SWP_SHOWWINDOW);
 
-			//SetWindowPos(hSettingWindow, hSettingButton , 200, 200, 400, 400, SWP_SHOWWINDOW);
-			
-
 		    EndPaint(hWnd, &ps);
 		    return 0;
 		}
-/*
-	case WM_SETFOCUS:
-		SetFocus(hSettingWindow);
-		break;*/
-		
-	case WM_SIZE:
-		{
-		    g_width  = LOWORD(lParam);
-			g_height = HIWORD(lParam);
 
-			
-			return 0;
+	case WM_GETMINMAXINFO:
+		{
+			 ((MINMAXINFO *)lParam)->ptMinTrackSize.x = 460;  
+             ((MINMAXINFO *)lParam)->ptMinTrackSize.y = 600;
+			 return 0;
 		}
 
 	case WM_SOCKET:
@@ -459,21 +495,6 @@ LRESULT CALLBACK WinProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			PostQuitMessage(0);
 		    return 0;
 		}
-		/*
-	case WM_COMMAND:
-		{
-			switch (LOWORD(wParam))
-			{
-			case IDB_PORT_CONFIRM:
-				MessageBox(NULL, "asfa", "sf", MB_OK);
-				break;
-			
-
-			default:
-				break;
-			}
-			return 0;
-		}	*/
 
 	case WM_NCHITTEST:
 		{
@@ -756,39 +777,21 @@ LRESULT CALLBACK MySettingButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPA
 			EndPaint(hwnd, &ps);
 			return 0;
 		}	
-/*
-	case WM_MOUSEHOVER:
-		{
-			Graphics graphics(GetDC(hwnd));
-			Image image(L"Assets/setting_on.png");
-			graphics.DrawImage(&image, 0, 0, 109, 60);
-			graphics.ReleaseHDC(GetDC(hwnd));
-			return 0;
-		}
-
-	case WM_MOUSELEAVE:
-		{
-			Graphics graphics(GetDC(hwnd));
-			Image image(L"Assets/setting.png");
-			graphics.DrawImage(&image, 0, 0, 109, 60);
-			graphics.ReleaseHDC(GetDC(hwnd));
-			return 0;
-		}
-
-	case WM_MOUSEMOVE:
-		{
-			TRACKMOUSEEVENT tme; 
-            tme.cbSize = sizeof(tme); 
-			tme.dwFlags = TME_HOVER|TME_LEAVE; 
-			tme.dwHoverTime = 1;
-			tme.hwndTrack = hwnd;
-			TrackMouseEvent(&tme); 
-			return 0;
-		}*/
 
 	case WM_LBUTTONUP:
 		{
 			isChat = 0;
+
+			SetWindowText(hServerAddressEdit, tempAddress);
+			SetWindowText(hPortEdit, tempPort);
+			
+			EnableWindow(hChatContent, FALSE);
+			EnableWindow(hChatMessageEdit, FALSE);
+			EnableWindow(hPortConfirm, TRUE);
+			EnableWindow(hPortEdit, TRUE);
+			EnableWindow(hUDPButton, TRUE);
+			EnableWindow(hServerAddressEdit, TRUE);
+
 			ShowWindow(hSettingButton, SW_HIDE);
 			ShowWindow(hSettingButton, SW_SHOW);
 
@@ -803,6 +806,8 @@ LRESULT CALLBACK MySettingButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPA
 			ShowWindow(hPortConfirm, SW_SHOW);
 			ShowWindow(hPortEdit, SW_SHOW);
 			ShowWindow(hPortLabel, SW_SHOW);
+			ShowWindow(hServerAddressEdit, SW_SHOW);
+			ShowWindow(hServerAddressLabel, SW_SHOW);		
 		}
 		
 	default:
@@ -836,35 +841,6 @@ LRESULT CALLBACK MyChatButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 			EndPaint(hwnd, &ps);
 			return 0;
 		}	
-/*
-	case WM_MOUSEHOVER:
-		{
-			Graphics graphics(GetDC(hwnd));
-			Image image(L"Assets/close_on.png");
-		    graphics.DrawImage(&image, 0, 0, 30, 25);
-			graphics.ReleaseHDC(GetDC(hwnd));
-			return 0;
-		}
-
-	case WM_MOUSELEAVE:
-		{
-			Graphics graphics(GetDC(hwnd));
-			Image image(L"Assets/close.png");
-		    graphics.DrawImage(&image, 0, 0, 30, 25);
-			graphics.ReleaseHDC(GetDC(hwnd));
-			return 0;
-		}
-
-	case WM_MOUSEMOVE:
-		{
-			TRACKMOUSEEVENT tme; 
-            tme.cbSize = sizeof(tme); 
-			tme.dwFlags = TME_HOVER|TME_LEAVE; 
-			tme.dwHoverTime = 1;
-			tme.hwndTrack = hwnd;
-			TrackMouseEvent(&tme); 
-			return 0;
-		}*/
 
 	case WM_LBUTTONUP:
 		{
@@ -884,6 +860,13 @@ LRESULT CALLBACK MyChatButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 			ShowWindow(hPortConfirm, SW_HIDE);
 			ShowWindow(hPortEdit, SW_HIDE);
 			ShowWindow(hPortLabel, SW_HIDE);
+			
+			EnableWindow(hChatContent, TRUE);
+			EnableWindow(hChatMessageEdit, TRUE);
+			EnableWindow(hPortConfirm, FALSE);
+			EnableWindow(hPortEdit, FALSE);
+			EnableWindow(hUDPButton, FALSE);
+			EnableWindow(hServerAddressEdit, FALSE);
 		}
 
 	default:
@@ -891,27 +874,25 @@ LRESULT CALLBACK MyChatButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 	}
 }
 
-
-
 LRESULT CALLBACK MyPortEditProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	
 	switch (message)
 	{	
-		/*
+		
 	case WM_PAINT:
 		{
 			HDC hdc;
 			PAINTSTRUCT ps;
 			hdc = BeginPaint(hwnd, &ps);
 
-		
+			Graphics graphics(hdc);
+		    Pen blackPen(Color(255, 69, 133, 243), 1);
+			graphics.DrawRectangle(&blackPen, 0, 0, 129, 29);
 
 			EndPaint(hwnd, &ps);
 			return 0;
-		}	*/
-
-
+		}	
 
 	default:
 		return CallWindowProc(OrginProc, hwnd, message, wParam, lParam);
@@ -994,12 +975,9 @@ LRESULT CALLBACK MyServerAddressEditProc(HWND hwnd, UINT message, WPARAM wParam,
 			PAINTSTRUCT ps;
 			hdc = BeginPaint(hwnd, &ps);
 
-			Graphics    graphics(hdc);
-			FontFamily  fontFamily(L"Arial");
-			Font        font(&fontFamily, 16, FontStyleRegular, UnitPixel);
-			PointF      pointF(0.0f, 0.0f);
-			SolidBrush  solidBrush(Color(255, 115, 115, 115));
-			graphics.DrawString(L"Setting", -1, &font, pointF, &solidBrush);
+			Graphics graphics(hdc);
+		    Pen blackPen(Color(255, 69, 133, 243), 1);
+			graphics.DrawRectangle(&blackPen, 0, 0, 129, 29);
 
 			EndPaint(hwnd, &ps);
 			return 0;
@@ -1010,9 +988,9 @@ LRESULT CALLBACK MyServerAddressEditProc(HWND hwnd, UINT message, WPARAM wParam,
 	}
 	
 }
+
 LRESULT CALLBACK MyPortConfirmProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	
 	switch (message)
 	{		
 	case WM_PAINT:
@@ -1044,7 +1022,7 @@ LRESULT CALLBACK MyPortConfirmProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 			if (clientSocket == INVALID_SOCKET)
 			{
 				
-				char tempAddress[20];			
+				//tempAddress[20];			
 				GetWindowText(hServerAddressEdit, tempAddress, 20);
 				if (strcmp(tempAddress, "") == 0)
 				{
@@ -1052,7 +1030,7 @@ LRESULT CALLBACK MyPortConfirmProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 					return 0;
 				}
 
-				char tempPort[10];
+				//char tempPort[5];
 				GetWindowText(hPortEdit, tempPort, 5);
 				port = (int)strtod(tempPort, NULL);
 				if (port < 1 || port > 65535)
@@ -1061,16 +1039,41 @@ LRESULT CALLBACK MyPortConfirmProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 					return 0;
 				}
 
-				if (!Connect(tempAddress, port))
-				{
-					MessageBox(NULL, "Can't connect to Server", "Error", MB_OK);
-					return 0;
-				}
-				confirmButtonText = L"Cancel";
-				InvalidateRect(hPortConfirm, NULL, TRUE);
+				//addressTemp = tempAddress;
 
-				labelText = L"Connecting...";
-				InvalidateRect(hStateLabel, NULL, TRUE);
+
+				//SetWindowText(hServerAddressEdit, "");
+				//SetWindowText(hPortEdit, "");
+
+				if (isUDP)
+				{
+					clientSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	                if (clientSocket == INVALID_SOCKET)
+		                return 0;
+
+					remoteAddr = getSockAddr(tempAddress, port);
+
+					confirmButtonText = L"Stop";
+				    InvalidateRect(hPortConfirm, NULL, TRUE);
+
+				    labelText = L"Ready to Chat";
+				    InvalidateRect(hStateLabel, NULL, TRUE);	
+
+					EnableWindow(hServerAddressEdit, TRUE);
+				}
+				else
+				{
+					if (!Connect(tempAddress, port))
+				    {
+					    MessageBox(NULL, "Can't connect to Server", "Error", MB_OK);
+					    return 0;
+				    }
+					confirmButtonText = L"Cancel";
+				    InvalidateRect(hPortConfirm, NULL, TRUE);
+
+				    labelText = L"Connecting...";
+				    InvalidateRect(hStateLabel, NULL, TRUE);
+				}			
 			}
 			else
 			{
@@ -1087,6 +1090,9 @@ LRESULT CALLBACK MyPortConfirmProc(HWND hwnd, UINT message, WPARAM wParam, LPARA
 			    
 			    labelText = L"Idle";
 			    InvalidateRect(hStateLabel, NULL, TRUE);
+
+				//SetWindowText(hServerAddressEdit, "");
+				//SetWindowText(hPortEdit, "");
 			}
 		}
 		
@@ -1102,15 +1108,7 @@ LRESULT CALLBACK MyChatMessageEditProc(HWND hwnd, UINT message, WPARAM wParam, L
 {
 	switch (message)
 	{	
-		/*
-	case WM_CREATE:
-		{
-			
 
-			return 0;
-		}*/
-		/*
-		}
 		
 	case WM_PAINT:
 		{
@@ -1118,12 +1116,21 @@ LRESULT CALLBACK MyChatMessageEditProc(HWND hwnd, UINT message, WPARAM wParam, L
 			PAINTSTRUCT ps;
 			hdc = BeginPaint(hwnd, &ps);
 
-		
+			Graphics graphics(hdc);
+		    Pen blackPen(Color(255, 69, 133, 243), 1);
+			graphics.DrawRectangle(&blackPen, 0, 0, 360, 29);
 
 			EndPaint(hwnd, &ps);
 			return 0;
-		}	*/
+		}	
 
+		/*
+	case WM_SETFOCUS:
+		{
+			isChatMessageEditFocus = 1;
+			InvalidateRect(hMainWindow, NULL, TRUE);
+			return 0;
+		}*/
 
 
 	default:
@@ -1160,18 +1167,24 @@ LRESULT CALLBACK MyChatSendButtonProc(HWND hwnd, UINT message, WPARAM wParam, LP
 
 			char szText[1024];
 			GetWindowText(hChatMessageEdit, szText, 1024);
-			//strcat(szText, "\r\n");
 
-			if (send(clientSocket, szText, strlen(szText), 0) != -1)
+			if (isUDP)
 			{
+				
+				UDPSend(remoteAddr, szText, 1024);
 				SendMessage(hChatContent, LB_ADDSTRING, NULL, (LPARAM)szText);
 				SetWindowText(hChatMessageEdit, "");
 			}
-		
+			else
+			{
+				if (send(clientSocket, szText, strlen(szText), 0) != -1)
+			    {
+				    SendMessage(hChatContent, LB_ADDSTRING, NULL, (LPARAM)szText);
+				    SetWindowText(hChatMessageEdit, "");
+			    }
+			}			
 		}
 		
-
-
 	default:
 		return CallWindowProc(OrginProc, hwnd, message, wParam, lParam);
 	}
@@ -1201,34 +1214,13 @@ LRESULT CALLBACK MyChatClearButtonProc(HWND hwnd, UINT message, WPARAM wParam, L
 			EndPaint(hwnd, &ps);
 			return 0;
 		}	
-/*
+
 	case WM_LBUTTONDOWN:
 		{
-			if (serverSocket == INVALID_SOCKET)
-			{
-				char* temp;
-				GetWindowText(hPortEdit, temp, 5);
-				port = (int)strtod(temp, NULL);
-				if (port < 1 || port > 65535)
-				{
-					MessageBox(NULL, "Wrong Port Number", "Error", MB_OK);
-					break;
-				}
-
-				if (!CreateAndListen(port))
-				{
-					MessageBox(NULL, "Error in Start Service", "Error", MB_OK);
-					break;
-				}
-			}
-			else
-			{
-				CloseAllSocket();
-			}
+			SendMessage(hChatContent, LB_RESETCONTENT, 0, 0);
+			return 0;
 		}
-		*/
-
-
+		
 	default:
 		return CallWindowProc(OrginProc, hwnd, message, wParam, lParam);
 	}
@@ -1245,7 +1237,7 @@ LRESULT CALLBACK MyStateLabelProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 			hdc = BeginPaint(hwnd, &ps);
 
 			Graphics    graphics(hdc);
-
+			
 			SolidBrush solidBrush1(Color(255, 69, 133, 243));
 			graphics.FillRectangle(&solidBrush1, 0, 0, 200, 20);
 
@@ -1254,7 +1246,7 @@ LRESULT CALLBACK MyStateLabelProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 			PointF      pointF(0.0f, 2.0f);
 			SolidBrush  solidBrush(Color(255, 255, 255, 255));
 			graphics.DrawString(labelText, -1, &font, pointF, &solidBrush);
-
+			
 			EndPaint(hwnd, &ps);
 			return 0;
 		}	
@@ -1264,7 +1256,77 @@ LRESULT CALLBACK MyStateLabelProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 	}
 }
 
+LRESULT CALLBACK MyUDPButtonProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{		
+	case WM_PAINT:
+		{	
+			HDC hdc;
+			PAINTSTRUCT ps;
+			hdc = BeginPaint(hwnd, &ps);
 
+			Graphics graphics(hdc);
+		    SolidBrush solidBrush1(Color(255, 69, 133, 243));
+			graphics.FillRectangle(&solidBrush1, 0, 0, 400, 30);
+
+			FontFamily  fontFamily(L"Arial");
+			Font        font(&fontFamily, 16, FontStyleRegular, UnitPixel);
+			PointF      pointF(0.0f, 5.0f);
+			SolidBrush  solidBrush(Color(255, 255, 255, 255));
+			if (isUDP)
+			{
+				graphics.DrawString(L"UDPON", -1, &font, pointF, &solidBrush);
+			}
+			else
+			{
+				graphics.DrawString(L"TCPON", -1, &font, pointF, &solidBrush);
+			}
+			
+			
+			EndPaint(hwnd, &ps);
+			return 0;
+		}	
+
+	case WM_LBUTTONDOWN:
+		{
+			if (isUDP)
+			{
+				isUDP = 0;
+			}
+			else
+			{
+				isUDP = 1;
+			}
+			InvalidateRect(hwnd, NULL, TRUE);
+		}
+		
+	default:
+		return CallWindowProc(OrginProc, hwnd, message, wParam, lParam);
+	}
+}
+
+void setLabelText(HWND hwnd, LPWSTR text, int bgWidth, int bgHeight, float fontX, float fontY)
+{
+	HDC hdc;
+	PAINTSTRUCT ps;
+	hdc = BeginPaint(hwnd, &ps);
+
+	Graphics    graphics(hdc);
+
+	//SolidBrush solidBrush1(Color(255, 69, 133, 243));
+	SolidBrush solidBrush1(Color(255, 0, 0, 0));
+	graphics.FillRectangle(&solidBrush1, 0, 0, bgWidth, bgHeight);
+
+	FontFamily  fontFamily(L"Arial");
+	Font        font(&fontFamily, 12, FontStyleRegular, UnitPixel);
+	PointF      pointF(fontX, fontY);
+	SolidBrush  solidBrush(Color(255, 255, 255, 255));
+	graphics.DrawString(text, -1, &font, pointF, &solidBrush);
+
+
+	EndPaint(hwnd, &ps);
+}
 
 
 long onSocket(WPARAM wParam, LPARAM lParam)
@@ -1283,7 +1345,7 @@ long onSocket(WPARAM wParam, LPARAM lParam)
 	{
 	case FD_CONNECT:
 		{
-			confirmButtonText = L"Disconnect";
+			confirmButtonText = L"Stop";
 			InvalidateRect(hPortConfirm, NULL, TRUE);
 
 			EnableWindow(hChatMessageEdit, TRUE);
@@ -1344,6 +1406,42 @@ BOOL Connect(LPCTSTR pszRemoteAddr, u_short nPort)
 	connect(clientSocket, (sockaddr*)&remote, sizeof(sockaddr));
 
 	return TRUE;
+}
+
+BOOL UDPSend(sockaddr_in remote, char* buf, int len)
+{
+	
+
+	WSAAsyncSelect(clientSocket, hMainWindow, WM_SOCKET, FD_CONNECT|FD_CLOSE|FD_WRITE|FD_READ);
+
+	//sockaddr_in romote =  getSockAddr(pszRemoteAddr,  nPort);
+
+	sendto(clientSocket, buf, len, 0, (SOCKADDR*)&remote, sizeof(SOCKADDR));
+
+	return TRUE;
+}
+
+sockaddr_in getSockAddr(LPCTSTR pszRemoteAddr, u_short nPort)
+{
+	sockaddr_in remote = {0};
+	ULONG uAddr = inet_addr(pszRemoteAddr);
+	if (uAddr == INADDR_NONE)
+	{
+		hostent* pHost = gethostbyname(pszRemoteAddr);
+		if (pHost == NULL)
+		{
+			closesocket(clientSocket);
+			clientSocket = INVALID_SOCKET;
+			return remote;
+		}
+		uAddr = ((struct in_addr*)*(pHost->h_addr_list))->S_un.S_addr;
+	}
+
+	remote.sin_addr.S_un.S_addr = uAddr;
+	remote.sin_family = AF_INET;
+	remote.sin_port = htons(nPort);
+
+	return remote;
 }
 
 LPWSTR stringToWString(const char* szString)
