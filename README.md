@@ -6,11 +6,11 @@ This is a Win32 Socket System. In this System, a client can send message to serv
 
 ### This is the client
 
-![alt tag](image/client.JPG)
+![alt tag](Image/client.JPG)
 
 
 
 
 ### This is the server
 
-![alt tag](image/server.JPG)
+![alt tag](Image/server.JPG)
